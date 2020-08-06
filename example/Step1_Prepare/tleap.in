@@ -1,0 +1,13 @@
+source leaprc.protein.ff14SB
+source leaprc.water.tip3p
+source leaprc.gaff2
+loadamberparams frcmod.ions1lm_126_tip3p
+loadamberparams frcmod.ions234lm_126_tip3p
+loadamberparams 1eby_ligand_gaff2.frcmod
+REC=loadpdb 1eby_protein_noWat.pdb
+LIG=loadmol2 1eby_ligand_noOpt_BCC_gaff2.mol2
+COM=combine { REC LIG }
+set default PBRadii mbondi2
+check COM
+saveamberparm COM COM.top COM.crd
+quit

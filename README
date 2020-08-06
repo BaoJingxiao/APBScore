@@ -1,0 +1,127 @@
+APBScore v0.1 (by Bao Jingxiao 2020.8)
+
+Introduction--------------------------------------------------------------------
+APBScore is a scoring function that mainly aimed at estimating the binding free
+energy between protein receptor and small organic ligand. It is a physical-based
+scoring function and has three terms including atom pairwised van der Waals
+energy, electrostatic energy and hydrogen bond energy between the receptor and
+ligand. This scoring function is developed based on Amber force fields and
+requires basic knowledge of Amber program (e.g. prepare ligand with antechamber,
+build complex top and crd files with leap and run energy minimizations with 
+sander or pmemd) to use.
+--------------------------------------------------------------------------------
+
+Make and Install----------------------------------------------------------------
+0.Amber program is required before you can make and use APBScore. The NetCDF lib
+  built by amber are required for making, antechamber and tleap are required to
+  build the complex top and crd files, pmemd or sander is required to perform
+  energy minimizations. Amber18+AmberTools19 were used during developing, so
+  modifications may be required for other amber versions.
+
+1.Open a shell terminal and cd to the "src" folder, edit the "Make.sh" file by
+  changing the XXX of the 3rd line to the file path where your amber is
+  installed (e.g. /home/paul/amber18). If your amber were not built with the GNU
+  compiler, you will also need to change the fortran compiler to the compiler
+  with which you built your amber, and the compiler options may also need to be
+  changed.
+
+2.Run "bash Make.sh" to make and install the APBScore program. The binary file
+  named APBScore will be placed in the "bin" folder under the same directory as
+  "src". Add the bin folder to your $PATH, or you can use the full path when
+  run APBScore.
+--------------------------------------------------------------------------------
+
+Brief Example-------------------------------------------------------------------
+0.There is a brief example in the "example" folder, we recommend you to backup
+  this folder before testing. There are mainly three steps: 1) prepare receptor
+  and ligand to get complex top and crd files, 2) run energy minimization in
+  vacuum with internal dielectric constant set to 3.0, 3) calculate APBScore on
+  the minimized structure. The first two steps require users to have basic
+  knowledge about Amber program, you can visit "http://ambermd.org/tutorials/"
+  for amber official tutorials.
+
+1.The complex structure should first be split into a receptor file in PDB format
+  (e.g. 1eby_protein_noWat.pdb) and a ligand file in Tripos Mol2 format (e.g.
+  1eby_ligand.mol2). Waters should be removed from the receptor, and residue
+  name and atom name should be adjusted to Amber format. Since the protonation
+  states are controlled by residue name in Amber, hydrogen atoms are not
+  necessary required in the receptor PDB file. All atoms including hydrogens are
+  required for the ligand Mol2 file, and correct tripos atom type and bond order
+  should be set.
+
+2.The ligand is prepared with "LIG_Prepare.sh" by calculating the AM1-BCC atom
+  charges and assigning gaff2 atom types with antechamber to get the
+  "1eby_ligand_noOpt_BCC_gaff2.mol2" file, and assigning suitable force field
+  parameters for missing parameters with parmchk2 to get the
+  "1eby_ligand_gaff2.frcmod" file. Since we think the original ligand structure
+  is reasonable, we do not perform structure optimizations during QM calculation
+  (by adding "maxcyc=0" with "-ek" flag) to speed up the charge calculation.
+  "scfconv=1.d-8" and "ndiis_attempts=700" are also added to make the scf more
+  easy to convergence.
+
+3.tleap is used to get the "COM.top" and "COM.crd" files with commands in the
+  "tleap.in" file. The "leaprc.protein.ff14SB" force field is used for protein
+  , "leaprc.gaff2" force field is used for ligand, "leaprc.water.tip3p" with
+  "frcmod.ions1lm_126_tip3p" and "frcmod.ions234lm_126_tip3p" are used for ions.
+  The FFPTM force field can be used for common post-translational modified
+  residues. If there are disulfide bonds in receptor, they should be bond with
+  the "bond" command in tleap.
+
+4.The complex structure should then be minimized before scoring. During the
+  developing of APBScore, several minimize methods were tested, and minimize in
+  vacuum with internal dielectric constant set to 3.0 shown best performance
+  when both accuracy and efficiency were considered. Run "bash Run_Minimize.sh"
+  in the "Step2_Min_VAC_Diel3.0" folder to perform the minimizations. It will
+  first call the "ChangeTopCharge.sh" script to get a temporary top file named
+  "COM_mod.top" where the atom charges are reduced to sqrt(1/3) of the original.
+  This is equivalent to set a internal dielectric constant to 3.0, as the
+  electrostatic energy between atoms will be one third of the original.
+  
+5.Then, two stages minimizations will be performed. In the first stage, 10.0
+  kcal/mol/A^2 constraints are added on all heavy atoms of the complex and 500
+  steps steepest descent minimizations (SD) followed by 500 steps conjugate
+  gradient minimizations (CG) will be performed. In the next stage, there will
+  be no constraint, and the system will be minimized by 500 steps SD and 500
+  steps CG. In the script, the minimizations will be calculated on GPU with
+  pmemd.cuda, and the result rst file named "Com_min2.rst" will be used in
+  scoring. If your Amber version is older than 16 (where igb=6 is not supported
+  by pmemd.cuda), your can run the calculations on CPU with pmemd or pmemd.MPI.
+  If you do not have Amber, you can use sander or sander.MPI, which is free of
+  charge. However, the speed will be much slower when the calculations are run
+  on CPU(s).
+
+6.During the developing of APBScore, the energy minimizations were performed in
+  a more complex way. The complex was first minimized with 10.0 kcal/mol/A^2
+  constraints on all heavy atoms for 400 steps SD and 100 steps CG by pmemd.MPI
+  on CPUs, then minimized without constraints for 400 steps SD and 100 steps CG
+  by pmemd.MPI on CPUs, and finally minimized without constraints for 4500 steps
+  SD and 4500 steps CG by pmemd.cuda on GPU. We have tested the performance of
+  the minimize processes used in this example, and found that the scoring and
+  ranking power were similarly as those reported in our APBScore paper.
+
+7.After structure minimization, the APBScore can be calculated. A configure file
+  is required, see "APBScore.config" in the "Step3_Score" folder for example.
+  You will need to change the "file path" based on the location of your files.
+  Remember to add "/" at the end of your path. The complex topology file name is
+  COM.top and the restart file name is Com_min2.rst. This restart file must be
+  in NetCDF format. There are 199 residues in the complex and 1 to 198 residues
+  belong to the receptor while residue 199 is the ligand. The "fitting
+  coefficient data file path and name" should also be adjusted base on your file
+  location. The data file "APBScore_Fit_VAC_Diel3.0_123_Rst_kvdw.dat" in the
+  "dat" folder under the same directory as the "example" folder records the
+  fitted parameters for APBScore.
+
+8.After modified the "APBScore.config" file, you can now run
+  "../../bin/APBScore APBScore.config" to calculate the APBScore. The score is
+  reported in the unit of kcal/mol. Since, only VDW interactions between
+  receptor elements: H, C, N, O, S, Zn and ligand elements: H, C, N, O, P, S, F,
+  Cl, Br, I are calculated in APBScore, a notice will be reported when there are
+  other elements in receptor or ligand.
+
+9.The score result of the minimized complex in this example is -11.5561. Since
+  there will be small structure and energy differences between complexes
+  minimized with different computers, or even on the same computer with
+  different programs (i.e. sander, sander.MPI, pmemd, pmemd.MPI and pmemd.cuda),
+  slight difference on the score calculated on the complex minimized by yourself
+  is expected.
+--------------------------------------------------------------------------------
